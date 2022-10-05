@@ -38,21 +38,24 @@ class CanvasSpline(tk.Canvas):
         super().__init__(master, *args, **kwargs)
         self.master = master
         self.Points = []
+        self.line_mapping = dict()
         self.highlighted_point = None
         self.dragging = False
         self.start_point = None
 
         self.bind('<Button-1>', self.line_start)
         self.bind('<Button-1>', self.add_point, add="+")
-        self.bind('<Motion>', self.move_point)
         self.bind('<ButtonRelease-1>', self.line_end)
 
     def move_point(self, event):
         if self.dragging and self.master.state == State.MOVE:
             init_coords = self.ellipse_to_point(self.start_point)
-            self.move(self.start_point, event.x - init_coords[0], event.y - init_coords[1])
-            if self.highlighted_point is not None and self.start_point == self.highlighted_point[1]:
-                self.move(self.highlighted_point[0], event.x - init_coords[0], event.y - init_coords[1])
+            if self.highlighted_point is not None and self.start_point == self.highlighted_point:
+                self.move(self.start_point, event.x - init_coords[0], event.y - init_coords[1])
+                for line in self.line_mapping:
+                    line_tuple = self.line_mapping[line]
+                    if self.start_point in line_tuple:
+                        self.update_base_line(line_tuple[0], line_tuple[1], line)
 
 
     def line_start(self, event):
@@ -64,6 +67,17 @@ class CanvasSpline(tk.Canvas):
                     print("user holding button!")
                     self.start_point = item
 
+    def create_base_line(self, start_point_id, end_point_id):
+        start_coords = self.ellipse_to_point(start_point_id)
+        end_coords = self.ellipse_to_point(end_point_id)
+        line_id = self.create_line(start_coords[0], start_coords[1], end_coords[0], end_coords[1], tags=["base_line"])
+        return line_id
+
+    def update_base_line(self, start_point_id, end_point_id, line_id):
+        start_coords = self.ellipse_to_point(start_point_id)
+        end_coords = self.ellipse_to_point(end_point_id)
+        self.coords(line_id, (start_coords[0], start_coords[1], end_coords[0], end_coords[1]))
+
     def line_end(self, event):
         if self.dragging:
             print("user stopped holding a button!")
@@ -74,9 +88,42 @@ class CanvasSpline(tk.Canvas):
                     for item in overlapped:
                         if "base_point" in self.gettags(item):
                             self.highlight_point(event)
-                            start_coords = self.ellipse_to_point(self.start_point)
-                            end_coords = self.ellipse_to_point(item)
-                            self.create_line(start_coords[0], start_coords[1], end_coords[0], end_coords[1], tags=["base_line"])
+                            if self.points_not_in_use(self.start_point, item) and self.start_point != item:
+                                line_id = self.create_base_line(self.start_point, item)
+                                print("spawned line!")
+                                self.line_mapping[line_id] = (self.start_point, item)
+                                for point in self.Points:
+                                    if point == self.start_point:
+                                        point.outbound_line_point = item
+                                    if point == item:
+                                        point.inbound_line_point = self.start_point
+
+    def points_not_in_use(self, start_point_id, end_point_id):
+        start_point = self.Points[self.Points.index(start_point_id)]
+        end_point = self.Points[self.Points.index(end_point_id)]
+        return \
+            (start_point_id, end_point_id) not in self.line_mapping \
+            and (end_point_id, start_point_id) not in self.line_mapping \
+            and start_point.outbound_line_point is None \
+            and end_point.inbound_line_point is None
+
+    def find_line_endpoint(self, start_point):
+        if start_point.outbound_line is not None:
+            for line in self.line_mapping:
+                line_tuple = self.line_mapping[line]
+                if start_point.outbound_line in line_tuple:
+                    if start_point.outbound_line == line_tuple[0]:
+                        return self.Points[self.Points.index(line_tuple[1])]
+        return None
+
+    def find_line_startpoint(self, end_point):
+        if end_point.inbound_line is not None:
+            for line in self.line_mapping:
+                line_tuple = self.line_mapping[line]
+                if end_point.inbound_line in line_tuple:
+                    if end_point.inbound_line == line_tuple[1]:
+                        return self.Points[self.Points.index(line_tuple[0])]
+        return None
 
     def add_point(self, event):
         overlapped = self.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
@@ -84,28 +131,51 @@ class CanvasSpline(tk.Canvas):
             id = self.create_oval(event.x - 5, event.y - 5, event.x + 5, event.y + 5, fill='black', tags=["base_point"])
             self.tag_bind(id, '<Button-2>', self.del_point)
             self.tag_bind(id, '<Button-3>', self.del_point)
+            self.tag_bind(id, '<Motion>', self.move_point)
             self.tag_bind(id, '<Button-1>', self.highlight_point)
             self.Points.append(Point(event.x, event.y, id))
 
     def del_point(self, event):
         id = self.find_closest(event.x, event.y)
-        if self.highlighted_point is not None and (id[0] == self.highlighted_point[0] or id[0] == self.highlighted_point[1]):
-            self.delete(self.highlighted_point[0])
-            self.delete(self.highlighted_point[1])
+        self.delete(id[0])
+        if id[0] == self.highlighted_point:
             self.highlighted_point = None
-        else:
-            self.delete(id[0])
+        try:
+            i = self.Points.index(id[0])
+            point = self.Points[i]
+
+            if point.inbound_line_point is not None:
+                for key, value in self.line_mapping.items():
+                    if (point.inbound_line_point, id[0]) in value:
+                        self.line_mapping.pop(key)
+                        self.delete(key)
+                        point.inbound_line_point = None
+
+                        i = self.Points.index(point.inbound_line_point)
+                        self.Points[i].outbound_line_point = None
+
+            if point.outbound_line_point is not None:
+                for key, value in self.line_mapping.items():
+                    if (id[0], point.outbound_line_point) in value:
+                        self.line_mapping.pop(key)
+                        self.delete(key)
+                        point.outbound_line_point = None
+
+                        i = self.Points.index(point.outbound_line_point)
+                        self.Points[i].inbound_line_point = None
+
+            print(f"removed point {id[0]}!")
+            self.Points.remove(id[0])
+        except ValueError:
+            pass
 
     def highlight_point(self, event):
-        if self.highlighted_point is not None:
-            self.delete(self.highlighted_point[0])
         id = self.find_closest(event.x, event.y)
-        coords = self.coords(id)
-        highlighted_point = self.create_oval(coords[0], coords[1], coords[2], coords[3], outline = 'green', width = 2)
-        print(len(self.find_all()))
-        self.tag_bind(highlighted_point, '<Button-2>', self.del_point)
-        self.tag_bind(highlighted_point, '<Button-3>', self.del_point)
-        self.highlighted_point = (highlighted_point, id[0])
+        if "base_point" in self.gettags(id):
+            if self.highlighted_point is not None:
+                self.itemconfig(self.highlighted_point, outline='black', width=0)
+            self.highlighted_point = id[0]
+            self.itemconfig(self.highlighted_point, outline='green', width=2)
 
     def ellipse_to_point(self, ellipse_id):
         coords = self.coords(ellipse_id)
@@ -116,8 +186,8 @@ class Point:
     def __init__(self, x, y, id):
         self.x, self.y = x, y
         self.id = id
-        self.inbound_line = None
-        self.outbound_line = None
+        self.inbound_line_point = None
+        self.outbound_line_point = None
 
     def __getitem__(self, item):
         if item == 0:
@@ -195,9 +265,9 @@ def calculate_bezier_anchors(p0: Point, p1: Point, p2: Point):
     return a0 + diff, a1 + diff
 
 def main():
-    a = Point(1, 1)
-    b = Point(3, 3)
-    c = Point(5, 5)
+    a = Point(1, 1, 0)
+    b = Point(3, 3, 1)
+    c = Point(5, 5, 2)
     p0, p1 = calculate_bezier_anchors(None, b, c)
     print(str(p0) + " " + str(p1))
     print(tuple(a))
