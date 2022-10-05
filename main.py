@@ -5,12 +5,38 @@ class CanvasSpline(tk.Canvas):
         super().__init__(master, *args, **kwargs)
         self.Points = []
         self.highlighted_point = None
+        self.dragging = False
+        self.start_point = None
 
-        self.bind('<Button-1>', self.add_point)
+        self.bind('<Button-1>', self.line_start)
+        self.bind('<Button-1>', self.add_point, add="+")
+        self.bind('<Motion>', self.move_point)
+        self.bind('<ButtonRelease-1>', self.line_end)
+
+    def move_point(self, event):
+        if self.dragging:
+            init_coords = self.coords(self.start_point)
+            init_coords = (init_coords[0] + (init_coords[2] - init_coords[0] ) / 2, init_coords[1] + (init_coords[3] - init_coords[1]) / 2)
+            self.move(self.start_point, event.x - init_coords[0], event.y - init_coords[1])
+            if self.highlighted_point is not None and self.start_point == self.highlighted_point[1]:
+                self.move(self.highlighted_point[0], event.x - init_coords[0], event.y - init_coords[1])
+
+
+    def line_start(self, event):
+        overlapped = self.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
+        if len(overlapped) > 0:
+            self.dragging = True
+            self.start_point = overlapped[0]
+            print("user holding button!")
+
+    def line_end(self, event):
+        if self.dragging:
+            print("user stopped holding a button!")
+            self.dragging = False
 
     def add_point(self, event):
         overlapped = self.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
-        if len(overlapped) <= 0:
+        if len(overlapped) <= 0 and self.dragging == False:
             id = self.create_oval(event.x - 5, event.y - 5, event.x + 5, event.y + 5, fill='black')
             self.tag_bind(id, '<Button-2>', self.del_point)
             self.tag_bind(id, '<Button-3>', self.del_point)
@@ -93,7 +119,6 @@ class Point:
         y_cart = height/2 - point[1]
         return x_cart, y_cart
 
-
     @staticmethod
     def get_length_between_points(p0, p1):
         return ((p0.x - p1.x) ** 2 + (p0.y - p1.y) ** 2) ** .5
@@ -111,11 +136,6 @@ def calculate_bezier_anchors(p0: Point, p1: Point, p2: Point):
     diff = p1 - b
 
     return a0 + diff, a1 + diff
-
-def hit_point(event):
-    size = 3
-    print(event)
-
 
 def main():
     a = Point(1, 1)
