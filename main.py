@@ -1,8 +1,42 @@
 import tkinter as tk
+from enum import Enum
+
+class State(Enum):
+    MOVE = 1
+    DRAW_LINE = 2
+
+class App(tk.Tk):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.frame = tk.Frame(self)
+        self.frame.pack()
+        self.state = State.MOVE
+
+        self.button1 = tk.Button(self.frame, text="move", state=["disabled"], command=self.set_moving)
+        self.button2 = tk.Button(self.frame, text="draw line", command=self.set_drawingline)
+        self.button1.pack()
+        self.button2.pack()
+
+        canva = CanvasSpline(self, width=400, height=400, bg='white')
+        canva.pack()
+
+    def set_moving(self):
+        self.state = State.MOVE
+        self.button1['state'] = 'disabled'
+        self.button2['state'] = 'normal'
+
+    def set_drawingline(self):
+        self.state = State.DRAW_LINE
+        self.button1['state'] = 'normal'
+        self.button2['state'] = 'disabled'
+
+
 
 class CanvasSpline(tk.Canvas):
     def __init__(self, master, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
+        self.master = master
         self.Points = []
         self.highlighted_point = None
         self.dragging = False
@@ -14,9 +48,8 @@ class CanvasSpline(tk.Canvas):
         self.bind('<ButtonRelease-1>', self.line_end)
 
     def move_point(self, event):
-        if self.dragging:
-            init_coords = self.coords(self.start_point)
-            init_coords = (init_coords[0] + (init_coords[2] - init_coords[0] ) / 2, init_coords[1] + (init_coords[3] - init_coords[1]) / 2)
+        if self.dragging and self.master.state == State.MOVE:
+            init_coords = self.ellipse_to_point(self.start_point)
             self.move(self.start_point, event.x - init_coords[0], event.y - init_coords[1])
             if self.highlighted_point is not None and self.start_point == self.highlighted_point[1]:
                 self.move(self.highlighted_point[0], event.x - init_coords[0], event.y - init_coords[1])
@@ -25,23 +58,34 @@ class CanvasSpline(tk.Canvas):
     def line_start(self, event):
         overlapped = self.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
         if len(overlapped) > 0:
-            self.dragging = True
-            self.start_point = overlapped[0]
-            print("user holding button!")
+            for item in overlapped:
+                if "base_point" in self.gettags(item):
+                    self.dragging = True
+                    print("user holding button!")
+                    self.start_point = item
 
     def line_end(self, event):
         if self.dragging:
             print("user stopped holding a button!")
             self.dragging = False
+            if self.master.state == State.DRAW_LINE:
+                overlapped = self.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
+                if len(overlapped) > 0:
+                    for item in overlapped:
+                        if "base_point" in self.gettags(item):
+                            self.highlight_point(event)
+                            start_coords = self.ellipse_to_point(self.start_point)
+                            end_coords = self.ellipse_to_point(item)
+                            self.create_line(start_coords[0], start_coords[1], end_coords[0], end_coords[1], tags=["base_line"])
 
     def add_point(self, event):
         overlapped = self.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
         if len(overlapped) <= 0 and self.dragging == False:
-            id = self.create_oval(event.x - 5, event.y - 5, event.x + 5, event.y + 5, fill='black')
+            id = self.create_oval(event.x - 5, event.y - 5, event.x + 5, event.y + 5, fill='black', tags=["base_point"])
             self.tag_bind(id, '<Button-2>', self.del_point)
             self.tag_bind(id, '<Button-3>', self.del_point)
             self.tag_bind(id, '<Button-1>', self.highlight_point)
-            self.Points.append(Point(event.x, event.y))
+            self.Points.append(Point(event.x, event.y, id))
 
     def del_point(self, event):
         id = self.find_closest(event.x, event.y)
@@ -63,11 +107,17 @@ class CanvasSpline(tk.Canvas):
         self.tag_bind(highlighted_point, '<Button-3>', self.del_point)
         self.highlighted_point = (highlighted_point, id[0])
 
+    def ellipse_to_point(self, ellipse_id):
+        coords = self.coords(ellipse_id)
+        return (coords[2] + coords[0]) / 2, (coords[3] + coords[1]) / 2
+
 
 class Point:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+    def __init__(self, x, y, id):
+        self.x, self.y = x, y
+        self.id = id
+        self.inbound_line = None
+        self.outbound_line = None
 
     def __getitem__(self, item):
         if item == 0:
@@ -77,27 +127,34 @@ class Point:
         else:
             raise IndexError()
 
+    def __iter__(self):
+        yield self.x
+        yield self.y
+
     def __add__(self, other):
         if isinstance(other, Point) or isinstance(other, tuple):
-            return Point(self.x + other[0], self.y + other[1])
+            return Point(self.x + other[0], self.y + other[1], self.id)
         raise TypeError(f"unsupported operand type(s) for +: {type(self)} and {type(other)}")
 
     def __sub__(self, other):
         if isinstance(other, Point) or isinstance(other, tuple):
-            return Point(self.x - other[0], self.y - other[1])
+            return Point(self.x - other[0], self.y - other[1], self.id)
         raise TypeError(f"unsupported operand type(s) for +: {type(self)} and {type(other)}")
 
     def __truediv__(self, other):
-        return Point(self.x / other, self.y / other)
+        return Point(self.x / other, self.y / other, self.id)
 
     def __mul__(self, other):
-        return Point(self.x * other, self.y * other)
+        return Point(self.x * other, self.y * other, self.id)
 
     def __str__(self):
         return f"({self.x}, {self.y})"
 
     def __eq__(self, other):
-        return self.x == other.x and self.y == other.y
+        if isinstance(other, Point):
+            return self.x == other.x and self.y == other.y
+        if isinstance(other, int):
+            return self.id == other
 
     @staticmethod
     def to_screen(point, width, height):
@@ -143,12 +200,9 @@ def main():
     c = Point(5, 5)
     p0, p1 = calculate_bezier_anchors(None, b, c)
     print(str(p0) + " " + str(p1))
+    print(tuple(a))
 
-    root = tk.Tk()
-
-    global canva
-    canva = CanvasSpline(root, width=400, height=400, bg='white')
-    canva.pack()
+    root = App()
 
     root.mainloop()
 
