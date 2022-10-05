@@ -1,24 +1,63 @@
 import tkinter as tk
 
 class CanvasSpline(tk.Canvas):
-    pass
+    def __init__(self, master, *args, **kwargs):
+        super().__init__(master, *args, **kwargs)
+        self.Points = []
+        self.highlighted_point = None
+
+        self.bind('<Button-1>', self.add_point)
+
+    def add_point(self, event):
+        overlapped = self.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
+        if len(overlapped) <= 0:
+            id = self.create_oval(event.x - 5, event.y - 5, event.x + 5, event.y + 5, fill='black')
+            self.tag_bind(id, '<Button-2>', self.del_point)
+            self.tag_bind(id, '<Button-3>', self.del_point)
+            self.tag_bind(id, '<Button-1>', self.highlight_point)
+            self.Points.append(Point(event.x, event.y))
+
+    def del_point(self, event):
+        id = self.find_closest(event.x, event.y)
+        if self.highlighted_point is not None and (id[0] == self.highlighted_point[0] or id[0] == self.highlighted_point[1]):
+            self.delete(self.highlighted_point[0])
+            self.delete(self.highlighted_point[1])
+            self.highlighted_point = None
+        else:
+            self.delete(id[0])
+
+    def highlight_point(self, event):
+        if self.highlighted_point is not None:
+            self.delete(self.highlighted_point[0])
+        id = self.find_closest(event.x, event.y)
+        coords = self.coords(id)
+        highlighted_point = self.create_oval(coords[0], coords[1], coords[2], coords[3], outline = 'green', width = 2)
+        print(len(self.find_all()))
+        self.tag_bind(highlighted_point, '<Button-2>', self.del_point)
+        self.tag_bind(highlighted_point, '<Button-3>', self.del_point)
+        self.highlighted_point = (highlighted_point, id[0])
+
 
 class Point:
     def __init__(self, x, y):
         self.x = x
         self.y = y
 
+    def __getitem__(self, item):
+        if item == 0:
+            return self.x
+        elif item == 1:
+            return self.y
+        else:
+            raise IndexError()
+
     def __add__(self, other):
-        if isinstance(other, Point):
-            return Point(self.x + other.x, self.y + other.y)
-        if isinstance(other, tuple):
+        if isinstance(other, Point) or isinstance(other, tuple):
             return Point(self.x + other[0], self.y + other[1])
         raise TypeError(f"unsupported operand type(s) for +: {type(self)} and {type(other)}")
 
     def __sub__(self, other):
-        if isinstance(other, Point):
-            return Point(self.x - other.x, self.y - other.y)
-        if isinstance(other, tuple):
+        if isinstance(other, Point) or isinstance(other, tuple):
             return Point(self.x - other[0], self.y - other[1])
         raise TypeError(f"unsupported operand type(s) for +: {type(self)} and {type(other)}")
 
@@ -30,6 +69,30 @@ class Point:
 
     def __str__(self):
         return f"({self.x}, {self.y})"
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+
+    @staticmethod
+    def to_screen(point, width, height):
+        """
+
+        :rtype: tuple
+        """
+        x_screen = point[0] + width/2
+        y_screen = height/2 - point[1]
+        return x_screen, y_screen
+
+    @staticmethod
+    def to_cartesian(point, width, height):
+        """
+
+        :rtype: tuple
+        """
+        x_cart = width/2 - point[0]
+        y_cart = height/2 - point[1]
+        return x_cart, y_cart
+
 
     @staticmethod
     def get_length_between_points(p0, p1):
@@ -50,7 +113,9 @@ def calculate_bezier_anchors(p0: Point, p1: Point, p2: Point):
     return a0 + diff, a1 + diff
 
 def hit_point(event):
+    size = 3
     print(event)
+
 
 def main():
     a = Point(1, 1)
@@ -61,14 +126,10 @@ def main():
 
     root = tk.Tk()
 
-    # Label() it display box
-    # where you can put any text.
-    canva = tk.Canvas(root, width=400, height=400, bg='white')
+    global canva
+    canva = CanvasSpline(root, width=400, height=400, bg='white')
     canva.pack()
 
-    canva.bind('<Button-1>', hit_point)
-
-    # running the main loop
     root.mainloop()
 
 if __name__ == '__main__':
