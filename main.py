@@ -71,6 +71,7 @@ class CanvasSpline(tk.Canvas):
         start_coords = self.ellipse_to_point(start_point_id)
         end_coords = self.ellipse_to_point(end_point_id)
         line_id = self.create_line(start_coords[0], start_coords[1], end_coords[0], end_coords[1], tags=["base_line"])
+        print(f"created line {line_id}!")
         return line_id
 
     def update_base_line(self, start_point_id, end_point_id, line_id):
@@ -146,23 +147,27 @@ class CanvasSpline(tk.Canvas):
 
             if point.inbound_line_point is not None:
                 for key, value in self.line_mapping.items():
-                    if (point.inbound_line_point, id[0]) in value:
+                    if (point.inbound_line_point, id[0]) == value:
                         self.line_mapping.pop(key)
                         self.delete(key)
-                        point.inbound_line_point = None
-
+                        print(f"deleted line {key}!")
                         i = self.Points.index(point.inbound_line_point)
+
+                        point.inbound_line_point = None
                         self.Points[i].outbound_line_point = None
+                        break
 
             if point.outbound_line_point is not None:
                 for key, value in self.line_mapping.items():
-                    if (id[0], point.outbound_line_point) in value:
+                    if (id[0], point.outbound_line_point) == value:
                         self.line_mapping.pop(key)
                         self.delete(key)
-                        point.outbound_line_point = None
-
+                        print(f"deleted line {key}!")
                         i = self.Points.index(point.outbound_line_point)
+
+                        point.outbound_line_point = None
                         self.Points[i].inbound_line_point = None
+                        break
 
             print(f"removed point {id[0]}!")
             self.Points.remove(id[0])
@@ -249,6 +254,36 @@ class Point:
     @staticmethod
     def get_length_between_points(p0, p1):
         return ((p0.x - p1.x) ** 2 + (p0.y - p1.y) ** 2) ** .5
+
+class BezierCurve:
+    def __init__(self, n, p0 = None, p1 = None, p2 = None, p3 = None):
+        self.p0, self.p1, self.p2, self.p3 = p0, p1, p2, p3
+        self.curr_t = 0.0
+        self.step = 1.0/n
+
+        p0x3 = self.p0 * 3
+        p1x3 = self.p1 * 3
+        p2x3 = self.p2 * 3
+
+        self.pow3arg = self.p3 - p2x3 + p1x3 - self.p0
+        self.pow2arg = p0x3 - p1x3 * 2 + p2x3
+        self.pow1arg = p1x3 - p0x3
+
+    def get_next_point(self):
+        point = None
+        if self.curr_t < 1.0:
+            point = self.pow3arg * self.curr_t ** 3 + self.pow2arg * self.curr_t ** 2 + self.pow1arg * self.curr_t + self.p0
+            self.curr_t += self.step
+        return point
+
+    def get_all_points(self):
+        points = []
+        t = 0.0
+        while t <= 1.0:
+            point = self.pow3arg * self.curr_t ** 3 + self.pow2arg * self.curr_t ** 2 + self.pow1arg * self.curr_t + self.p0
+            points.append(point)
+            t += self.step
+        return points
 
 def calculate_bezier_anchors(p0: Point, p1: Point, p2: Point):
     if p0 is None:
