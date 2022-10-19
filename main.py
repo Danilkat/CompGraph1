@@ -59,10 +59,24 @@ class CanvasSpline(tk.Canvas):
                 point = self.get_point_by_id(self.start_point)
                 point.x, point.y = event.x, event.y
 
+                startstart_point = 0
+                endend_point = 0
+
                 for line in self.line_mapping:
                     line_tuple = self.line_mapping[line]
                     if self.start_point in line_tuple:
                         self.update_bezier_line(line_tuple[0], line_tuple[1], recalculate_anchors= True)
+                        if line_tuple[0] == self.start_point:
+                            endend_point = line_tuple[1]
+                        else:
+                            startstart_point = line_tuple[0]
+
+                for line in self.line_mapping:
+                    line_tuple = self.line_mapping[line]
+                    if endend_point in line_tuple and endend_point == line_tuple[0] or \
+                            startstart_point in line_tuple and startstart_point == line_tuple[1]:
+                        self.update_bezier_line(line_tuple[0], line_tuple[1])
+
 
 
     def line_start(self, event):
