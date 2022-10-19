@@ -34,8 +34,11 @@ class App(tk.Tk):
 
 
 class CanvasSpline(tk.Canvas):
+    bezier_curve_n = 10 #Amount of base lines in single bezier curve
+
     def __init__(self, master, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
+        self.bezier_curves_count = 0
         self.master = master
         self.Points = []
         self.line_mapping = dict()
@@ -52,10 +55,14 @@ class CanvasSpline(tk.Canvas):
             init_coords = self.ellipse_to_point(self.start_point)
             if self.highlighted_point is not None and self.start_point == self.highlighted_point:
                 self.move(self.start_point, event.x - init_coords[0], event.y - init_coords[1])
+
+                point = self.get_point_by_id(self.start_point)
+                point.x, point.y = event.x, event.y
+
                 for line in self.line_mapping:
                     line_tuple = self.line_mapping[line]
                     if self.start_point in line_tuple:
-                        self.update_base_line(line_tuple[0], line_tuple[1], line)
+                        self.update_bezier_line(line_tuple[0], line_tuple[1], recalculate_anchors= True)
 
 
     def line_start(self, event):
@@ -67,10 +74,108 @@ class CanvasSpline(tk.Canvas):
                     print("user holding button!")
                     self.start_point = item
 
-    def create_base_line(self, start_point_id, end_point_id):
-        start_coords = self.ellipse_to_point(start_point_id)
-        end_coords = self.ellipse_to_point(end_point_id)
-        line_id = self.create_line(start_coords[0], start_coords[1], end_coords[0], end_coords[1], tags=["base_line"])
+    def update_bezier_line(self, p0, p1, recalculate_anchors = False):
+        bezier_tag = 0
+
+        if isinstance(p0, int):
+            start_point = self.get_point_by_id(p0)
+        else:
+            start_point = p0
+
+        if isinstance(p1, int):
+            end_point = self.get_point_by_id(p1)
+        else:
+            end_point = p1
+
+        if start_point is not None and end_point is not None:
+            for key, value in self.line_mapping.items():
+                if (start_point.id, end_point.id) == value:
+                    #self.line_mapping.pop(key)
+                    bezier_tag = key
+                    self.delete(key)
+
+                    if recalculate_anchors:
+                        start_point.inbound_bezier_anchor, start_point.outbound_bezier_anchor = calculate_bezier_anchors(
+                            self.get_point_by_id(start_point.inbound_line_point),
+                            start_point,
+                            end_point
+                        )
+
+                        end_point.inbound_bezier_anchor, end_point.outbound_bezier_anchor = calculate_bezier_anchors(
+                            start_point,
+                            end_point,
+                            self.get_point_by_id(end_point.outbound_line_point)
+                        )
+
+                    curve = BezierCurve(self.bezier_curve_n,
+                                        start_point,
+                                        start_point.outbound_bezier_anchor,
+                                        end_point.inbound_bezier_anchor,
+                                        end_point)
+
+                    curve_points = curve.get_all_points()
+
+                    for i in range(0, len(curve_points) - 1):
+                        self.create_base_line(curve_points[i], curve_points[i+1], [bezier_tag])
+
+
+    def create_bezier_line(self, start_point_id, end_point_id):
+        start_point = None
+        end_point = None
+        for point in self.Points:
+            if point == start_point_id:
+                start_point = point
+                point.outbound_line_point = end_point_id
+            if point == end_point_id:
+                end_point = point
+                point.inbound_line_point = start_point_id
+
+        startstart_point = self.get_point_by_id(start_point.inbound_line_point)
+        endend_point = self.get_point_by_id(end_point.outbound_line_point)
+
+        start_point.inbound_bezier_anchor, start_point.outbound_bezier_anchor = calculate_bezier_anchors(
+            startstart_point,
+            start_point,
+            end_point
+        )
+
+        end_point.inbound_bezier_anchor, end_point.outbound_bezier_anchor = calculate_bezier_anchors(
+            start_point,
+            end_point,
+            endend_point
+        )
+
+        curve = BezierCurve(self.bezier_curve_n,
+                            start_point,
+                            start_point.outbound_bezier_anchor,
+                            end_point.inbound_bezier_anchor,
+                            end_point)
+
+        curve_points = curve.get_all_points()
+
+        bezier_tag = f"bezier{self.bezier_curves_count}"
+        self.bezier_curves_count += 1
+
+        for i in range(0, len(curve_points) - 1):
+            self.create_base_line(curve_points[i], curve_points[i+1], [bezier_tag])
+
+        self.update_bezier_line(startstart_point, start_point)
+        self.update_bezier_line(end_point, endend_point)
+
+        return bezier_tag
+
+    def create_base_line(self, p0, p1, tags):
+        if isinstance(p0, int):
+            start_coords = self.ellipse_to_point(p0)
+        else:
+            start_coords = p0
+
+        if isinstance(p1, int):
+            end_coords = self.ellipse_to_point(p1)
+        else:
+            end_coords = p1
+
+        line_id = self.create_line(start_coords[0], start_coords[1], end_coords[0], end_coords[1], tags=["base_line", *tags])
         print(f"created line {line_id}!")
         return line_id
 
@@ -90,41 +195,26 @@ class CanvasSpline(tk.Canvas):
                         if "base_point" in self.gettags(item):
                             self.highlight_point(event)
                             if self.points_not_in_use(self.start_point, item) and self.start_point != item:
-                                line_id = self.create_base_line(self.start_point, item)
+                                line_id = self.create_bezier_line(self.start_point, item)
                                 print("spawned line!")
                                 self.line_mapping[line_id] = (self.start_point, item)
-                                for point in self.Points:
-                                    if point == self.start_point:
-                                        point.outbound_line_point = item
-                                    if point == item:
-                                        point.inbound_line_point = self.start_point
+
+
+    def get_point_by_id(self, id):
+        try:
+            return self.Points[self.Points.index(id)]
+        except ValueError:
+            return None
+
 
     def points_not_in_use(self, start_point_id, end_point_id):
-        start_point = self.Points[self.Points.index(start_point_id)]
-        end_point = self.Points[self.Points.index(end_point_id)]
+        start_point = self.get_point_by_id(start_point_id)
+        end_point = self.get_point_by_id(end_point_id)
         return \
             (start_point_id, end_point_id) not in self.line_mapping \
             and (end_point_id, start_point_id) not in self.line_mapping \
             and start_point.outbound_line_point is None \
             and end_point.inbound_line_point is None
-
-    def find_line_endpoint(self, start_point):
-        if start_point.outbound_line is not None:
-            for line in self.line_mapping:
-                line_tuple = self.line_mapping[line]
-                if start_point.outbound_line in line_tuple:
-                    if start_point.outbound_line == line_tuple[0]:
-                        return self.Points[self.Points.index(line_tuple[1])]
-        return None
-
-    def find_line_startpoint(self, end_point):
-        if end_point.inbound_line is not None:
-            for line in self.line_mapping:
-                line_tuple = self.line_mapping[line]
-                if end_point.inbound_line in line_tuple:
-                    if end_point.inbound_line == line_tuple[1]:
-                        return self.Points[self.Points.index(line_tuple[0])]
-        return None
 
     def add_point(self, event):
         overlapped = self.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
@@ -151,10 +241,10 @@ class CanvasSpline(tk.Canvas):
                         self.line_mapping.pop(key)
                         self.delete(key)
                         print(f"deleted line {key}!")
-                        i = self.Points.index(point.inbound_line_point)
 
+                        inbound_point = self.get_point_by_id(point.inbound_line_point)
+                        inbound_point.outbound_line_point = None
                         point.inbound_line_point = None
-                        self.Points[i].outbound_line_point = None
                         break
 
             if point.outbound_line_point is not None:
@@ -163,10 +253,10 @@ class CanvasSpline(tk.Canvas):
                         self.line_mapping.pop(key)
                         self.delete(key)
                         print(f"deleted line {key}!")
-                        i = self.Points.index(point.outbound_line_point)
 
+                        outbound_point = self.get_point_by_id(point.outbound_line_point)
+                        outbound_point.inbound_line_point = None
                         point.outbound_line_point = None
-                        self.Points[i].inbound_line_point = None
                         break
 
             print(f"removed point {id[0]}!")
@@ -188,11 +278,16 @@ class CanvasSpline(tk.Canvas):
 
 
 class Point:
-    def __init__(self, x, y, id):
+    def __init__(self, x, y, id, points = None):
         self.x, self.y = x, y
         self.id = id
+        self.points = points
+
         self.inbound_line_point = None
         self.outbound_line_point = None
+
+        self.inbound_bezier_anchor = None
+        self.outbound_bezier_anchor = None
 
     def __getitem__(self, item):
         if item == 0:
@@ -201,6 +296,13 @@ class Point:
             return self.y
         else:
             raise IndexError()
+
+    def __setattr__(self, name, value):
+        if name == "inbound_line_point":
+            pass
+            #calculate_bezier_anchors(self.p0, self, None)
+        self.__dict__[name] = value
+        return self.__dict__[name]
 
     def __iter__(self):
         yield self.x
@@ -280,7 +382,7 @@ class BezierCurve:
         points = []
         t = 0.0
         while t <= 1.0:
-            point = self.pow3arg * self.curr_t ** 3 + self.pow2arg * self.curr_t ** 2 + self.pow1arg * self.curr_t + self.p0
+            point = self.pow3arg * t ** 3 + self.pow2arg * t ** 2 + self.pow1arg * t + self.p0
             points.append(point)
             t += self.step
         return points
@@ -300,9 +402,13 @@ def calculate_bezier_anchors(p0: Point, p1: Point, p2: Point):
     return a0 + diff, a1 + diff
 
 def main():
-    a = Point(1, 1, 0)
-    b = Point(3, 3, 1)
-    c = Point(5, 5, 2)
+    points = []
+    a = Point(1, 1, 0, points)
+    points.append(a)
+    b = Point(3, 3, 1, points)
+    points.append(b)
+    c = Point(5, 5, 2, points)
+    points.append(c)
     p0, p1 = calculate_bezier_anchors(None, b, c)
     print(str(p0) + " " + str(p1))
     print(tuple(a))
